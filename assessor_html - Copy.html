@@ -399,7 +399,6 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
-<button onclick="testSave()" style="position:fixed;top:10px;right:10px;zindex:9999;background:red;color:white;padding:10px;border:none;">TEST SAVE</button>
     </style>
 </head>
 <body>
@@ -699,13 +698,15 @@
     <script>
     // ==== CONFIG ====
     const SPREADSHEET_ID = '1gLkdYbgQzDtF7SOodWFARH8Sa0LtutQIRimfXu4WvcI';
-    const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzGM8ZdOcr5xE-E4nPi7b59gT6ep2MES-EKBpALn2HtgvMQ1mBUw_pGD1T-SH69hliw/exec';
+    const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxdfu2qdQqmUogh6QUCWiwCGHDsaaxAXJ0GUtPNKwsNrfBvQcpjA7AgLfaIoYa4rit7/exec';
 
     let users = [], assessments = [], staff = ['John Smith', 'Sarah Johnson'];
     let isOnline = false;
     let isAuthenticated = false;
     let currentUser = null;
     let syncPending = false;
+    let nextUserId = Date.now(); // ← ADD THIS LINE
+    let nextAssessmentId = Date.now() + 100000; // ← ADD THIS LINE
 
     // Show/hide loading
     function showLoading() { document.getElementById('loadingOverlay').style.display = 'flex'; }
@@ -722,65 +723,75 @@
         }
     }
 
-async function testSave() {
-  console.log('TEST: Forcing save with sample data');
-  const testUsers = [{id: Date.now(), name: 'Debug User', postcode: 'TEST1', packageStartDate: '2023-01-01', medicationStatus: 'Prompt', assignedStaff: 'John Smith'}];
-  try {
-    const res = await fetch(SCRIPT_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'save', users: testUsers, assessments: [], staff: [] })
-    });
-    console.log('TEST RESPONSE:', await res.json());
-    alert('Check Google Sheet "Users" tab for "Debug User"!');
-  } catch (e) {
-    console.error('TEST ERROR:', e);
-  }
-}
+
 // === SAVE LOCALLY ===
 function saveLocal() {
     localStorage.setItem('users', JSON.stringify(users));
     localStorage.setItem('assessments', JSON.stringify(assessments));
     localStorage.setItem('staff', JSON.stringify(staff));
+    localStorage.setItem('nextUserId', nextUserId.toString());
+    localStorage.setItem('nextAssessmentId', nextAssessmentId.toString());
 }
-
 // === LOAD LOCALLY ===
 function loadLocal() {
     users = JSON.parse(localStorage.getItem('users') || '[]');
     assessments = JSON.parse(localStorage.getItem('assessments') || '[]');
     staff = JSON.parse(localStorage.getItem('staff') || '[]');
+    
+    // ✅ Load or initialize ID counters
+    nextUserId = parseInt(localStorage.getItem('nextUserId')) || Date.now();
+    nextAssessmentId = parseInt(localStorage.getItem('nextAssessmentId')) || Date.now() + 100000;
+    
+    // ✅ Update counters based on existing data
+    if (users.length > 0) {
+        nextUserId = Math.max(...users.map(u => u.id)) + 1;
+    }
+    if (assessments.length > 0) {
+        nextAssessmentId = Math.max(...assessments.map(a => a.id)) + 1;
+    }
 }
-
-// === SYNC TO GOOGLE SHEETS ===
+/// === SYNC TO GOOGLE SHEETS (safe debug version) ===
 async function syncWithCloud() {
     try {
         document.getElementById('syncStatus').textContent = 'Syncing...';
+
+        // ✅ Ensure arrays exist before logging
+        console.log('Saving payload:', {
+            users: Array.isArray(users) ? users : [],
+            assessments: Array.isArray(assessments) ? assessments : [],
+            staff: Array.isArray(staff) ? staff : []
+        });
 
         const response = await fetch(SCRIPT_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 action: 'save',
-                users,
-                assessments,
-                staff
+                users: Array.isArray(users) ? users : [],
+                assessments: Array.isArray(assessments) ? assessments : [],
+                staff: Array.isArray(staff) ? staff : []
             })
         });
 
         const result = await response.json();
+        console.log('Save response:', result);
+
         if (result.success) {
             document.getElementById('syncStatus').textContent = 'Synced ✅';
             isOnline = true;
         } else {
+            console.error('Save failed:', result);
             document.getElementById('syncStatus').textContent = 'Sync failed ❌';
             isOnline = false;
         }
+
     } catch (e) {
-        console.error('Sync error:', e);
+        console.error('❌ Sync error:', e);
         document.getElementById('syncStatus').textContent = 'Offline (saved locally)';
         isOnline = false;
     }
 }
+
 
 // === LOAD FROM GOOGLE SHEETS ===
 async function loadFromCloud() {
@@ -847,7 +858,7 @@ async function saveData() {
     document.getElementById('serviceUserForm').onsubmit = async e => {
         e.preventDefault();
         const user = {
-            id: Date.now() + Math.random(),
+            id: nextUserId++,
             name: document.getElementById('userName').value.trim(),
             postcode: document.getElementById('postcode').value.trim().toUpperCase(),
             packageStartDate: document.getElementById('packageStartDate').value,
@@ -875,7 +886,7 @@ async function saveData() {
             const due = new Date(start);
             due.setMonth(due.getMonth() + t.months);
             assessments.push({
-                id: Date.now() + Math.random(),
+                id: nextAssessmentId++,
                 userId: user.id,
                 type: t.type,
                 dueDate: due.toISOString().split('T')[0],
@@ -885,7 +896,9 @@ async function saveData() {
                 completedBy: null,
                 daysToComplete: null,
                 daysToWriteup: null,
-                status: 'pending'
+                status: 'pending',
+                reason: null,    // ← ADD THIS
+                notes: null      // ← ADD THIS
             });
         });
     }
@@ -997,7 +1010,7 @@ async function saveData() {
         }
         
         const midYearAssessment = {
-            id: Date.now() + Math.random(),
+            id: nextAssessmentId++,
             userId: userId,
             type: 'Mid-Year Assessment',
             dueDate: assessmentDate,
@@ -1146,7 +1159,7 @@ async function saveData() {
                 const due = new Date(base);
                 due.setMonth(due.getMonth() + n.m);
                 assessments.push({
-                    id: Date.now() + Math.random(),
+                    id: nextAssessmentId++,
                     userId: u.id,
                     type: n.type,
                     dueDate: due.toISOString().split('T')[0],
@@ -1317,7 +1330,7 @@ async function saveData() {
                         if (!r.Name || !r['Package Start Date']) return;
                         if (users.find(u => u.name === r.Name)) return;
                         const user = {
-                            id: Date.now() + Math.random(),
+                            id: nextUserId++,
                             name: r.Name,
                             postcode: (r.Postcode || '').toString().toUpperCase(),
                             packageStartDate: r['Package Start Date'],
